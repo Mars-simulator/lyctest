@@ -219,7 +219,9 @@ jobs:
         # 可选：主分支构建成功后打 latest 与 git sha 两个标签
         if: github.event_name == 'push'
         run: |
-          docker tag nest-typeorm-crud:ci ghcr.io/${{ github.repository }}:latest
-          docker tag nest-typeorm-crud:ci ghcr.io/${{ github.repository }}:${{ github.sha }}
-          docker push ghcr.io/${{ github.repository }}:latest
-          docker push ghcr.io/${{ github.repository }}:${{ github.sha }}
+          # GHCR 镜像名必须全小写；github.repository 可能含大写（如 Mars-simulator）
+          IMAGE_ID="ghcr.io/$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')"
+          docker tag nest-typeorm-crud:ci "${IMAGE_ID}:latest"
+          docker tag nest-typeorm-crud:ci "${IMAGE_ID}:${{ github.sha }}"
+          docker push "${IMAGE_ID}:latest"
+          docker push "${IMAGE_ID}:${{ github.sha }}"
