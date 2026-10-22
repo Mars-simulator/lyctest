@@ -1,0 +1,225 @@
+name: CI
+
+# 触发时机：推送到主分支、以及面向主分支的 PR
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+    branches: [master, main]
+
+# 最小权限：仅读取代码，镜像推送权限在 docker 作业单独声明
+permissions:
+  contents: read
+
+# 同一分支有新提交时，取消上一次仍在跑的流水线，避免浪费额度
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # 与 Dockerfile 的基础镜像保持一致
+  NODE_VERSION: '24'
+
+jobs:
+  # =========================================================
+  # 1. 静态检查 + 编译
+  # =========================================================
+  lint-build:
+    name: Lint & Build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: 安装依赖
+        run: npm ci --no-audit --no-fund
+
+      - name: 代码检查（oxlint type-aware）
+        run: npm run lint
+
+      - name: 编译（nest build）
+        run: npm run build
+
+  # =========================================================
+  # 2. 单元测试（全部 mock，无需外部服务）
+  # =========================================================
+  unit-test:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: lint-build
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: 安装依赖
+        run: npm ci --no-audit --no-fund
+
+      - name: 运行单元测试并收集覆盖率
+        # --forceExit：pino / ioredis 会留下挂起句柄，不强制退出可能拖到超时
+        run: npm run test:cov -- --forceExit
+
+      - name: 上传覆盖率报告
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: coverage/
+          retention-days: 7
+
+  # =========================================================
+  # 3. e2e 测试（加载 AppModule，依赖真实 MySQL + Redis）
+  # =========================================================
+  e2e-test:
+    name: E2E Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: lint-build
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: faben123
+          MYSQL_DATABASE: nest_crud_demo
+          TZ: Asia/Shanghai
+        ports:
+          - 3306:3306
+        # 健康检查通过之前，job 不会开始执行 steps
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -pfaben123 --silent"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd="redis-cli ping"
+          --health-interval=5s
+          --health-timeout=3s
+          --health-retries=10
+    env:
+      NODE_ENV: test
+      # 在 runner 上通过端口映射访问，不用 compose 里的服务名
+      DB_HOST: 127.0.0.1
+      DB_PORT: '3306'
+      DB_USERNAME: root
+      DB_PASSWORD: faben123
+      DB_DATABASE: nest_crud_demo
+      # 首次初始化自动建表（等价于 compose 的首启行为）
+      DB_SYNC: 'true'
+      REDIS_HOST: 127.0.0.1
+      REDIS_PORT: '6379'
+      REDIS_PASSWORD: ''
+      REDIS_DB: '0'
+      JWT_SECRET: ci-e2e-jwt-secret-not-for-production
+      LOG_LEVEL: warn
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: 安装依赖
+        run: npm ci --no-audit --no-fund
+
+      - name: 运行 e2e 测试
+        # --testTimeout：Nest 启动 + 首次连库可能超过默认 5s
+        # --forceExit：AppModule 持有 Redis 长连接，不强制退出会让 job 挂到超时
+        run: npm run test:e2e -- --testTimeout=30000 --forceExit
+
+  # =========================================================
+  # 4. 构建镜像 + 编排冒烟验证（真正的“能不能跑起来”）
+  # =========================================================
+  docker:
+    name: Docker Build & Smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    # 单测或 e2e 任一失败都不再构建镜像
+    needs: [unit-test, e2e-test]
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: 登录 GHCR
+        # 只在主分支推送时登录；PR 仅构建不推送
+        if: github.event_name == 'push'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 构建镜像
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          load: true
+          tags: nest-typeorm-crud:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: 编排启动全栈并探活
+        run: |
+          set -euo pipefail
+          # compose 依赖 .env，用模板生成一份 CI 专用配置
+          cp .env.example .env
+          sed -i 's/please-change-me-in-production/ci-smoke-secret-not-for-production/' .env
+          docker compose up -d --build
+
+          echo "等待 /health 返回 200 ..."
+          for i in $(seq 1 60); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' http://localhost:3000/health || true)
+            if [ "$code" = "200" ]; then
+              echo "应用已就绪（第 ${i} 次探测）"
+              curl -s http://localhost:3000/health
+              exit 0
+            fi
+            sleep 5
+          done
+
+          echo "::error::/health 在 300s 内未返回 200"
+          docker compose ps
+          docker compose logs --tail=100
+          exit 1
+
+      - name: 校验安全响应头
+        run: |
+          headers=$(curl -sI http://localhost:3000/health)
+          echo "$headers"
+          echo "$headers" | grep -qi 'x-content-type-options: nosniff' || { echo "::error::缺少 X-Content-Type-Options"; exit 1; }
+          echo "$headers" | grep -qi 'x-frame-options' || { echo "::error::缺少 X-Frame-Options"; exit 1; }
+
+      - name: 输出容器日志（失败时便于排查）
+        if: failure()
+        run: docker compose logs --tail=200
+
+      - name: 清理
+        if: always()
+        run: docker compose down -v
+
+      - name: 推送到 GHCR
+        # 可选：主分支构建成功后打 latest 与 git sha 两个标签
+        if: github.event_name == 'push'
+        run: |
+          docker tag nest-typeorm-crud:ci ghcr.io/${{ github.repository }}:latest
+          docker tag nest-typeorm-crud:ci ghcr.io/${{ github.repository }}:${{ github.sha }}
+          docker push ghcr.io/${{ github.repository }}:latest
+          docker push ghcr.io/${{ github.repository }}:${{ github.sha }}

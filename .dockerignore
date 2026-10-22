@@ -1,0 +1,28 @@
+# 依赖与构建产物（镜像内重新安装/构建）
+node_modules
+dist
+coverage
+
+# 版本控制与 IDE
+.git
+.gitignore
+.vscode
+.idea
+
+# 环境变量（构建上下文不携带真实密钥）
+.env
+.env.*
+!.env.example
+
+# 日志与临时文件
+*.log
+npm-debug.log*
+.temp
+.tmp
+
+# 文档
+*.md
+!README.md
+
+# 本地数据
+data
