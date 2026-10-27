@@ -1,5 +1,5 @@
 import { jest } from '@jest/globals';
-import { ForbiddenException, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import type { AuthUser } from '../auth/interfaces/jwt-payload.interface.js';
@@ -171,6 +171,47 @@ describe('AccountService', () => {
       accountRepoMock.find.mockResolvedValue([{ id: 1 }, { id: 2 }]);
 
       await expect(service.findIdsByOwner(7)).resolves.toEqual([1, 2]);
+    });
+  });
+
+  describe('validateForOperation（资金操作校验）', () => {
+    it('deposit：本人账户通过校验', async () => {
+      accountRepoMock.findOneBy.mockResolvedValue({
+        id: 1,
+        accountNo: 'AC1',
+        ownerId: owner.userId,
+        status: AccountStatus.Normal,
+      });
+
+      await expect(service.validateForOperation(1, owner, 'deposit')).resolves.toMatchObject({
+        id: 1,
+      });
+    });
+
+    it('withdraw：冻结账户拒绝出金', async () => {
+      accountRepoMock.findOneBy.mockResolvedValue({
+        id: 1,
+        accountNo: 'AC1',
+        ownerId: owner.userId,
+        status: AccountStatus.Frozen,
+      });
+
+      await expect(service.validateForOperation(1, owner, 'withdraw')).rejects.toBeInstanceOf(
+        BadRequestException,
+      );
+    });
+
+    it('receive：收款方不校验归属，冻结账户仍拒绝', async () => {
+      accountRepoMock.findOneBy.mockResolvedValue({
+        id: 1,
+        accountNo: 'AC1',
+        ownerId: 999,
+        status: AccountStatus.Normal,
+      });
+
+      await expect(service.validateForOperation(1, owner, 'receive')).resolves.toMatchObject({
+        id: 1,
+      });
     });
   });
 });

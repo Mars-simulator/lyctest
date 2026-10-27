@@ -83,6 +83,94 @@ services:
       retries: 3
       start_period: 40s
 
+  # ---------------- 账户服务（微服务拆分，APP_ROLE=account） ----------------
+  account-service:
+    profiles: ["split"]
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ledger-account
+    restart: unless-stopped
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      APP_ROLE: account
+      PORT: 3001
+      # 容器内通过服务名寻址
+      DB_HOST: mysql
+      DB_PORT: 3306
+      DB_USERNAME: ${DB_USERNAME:-root}
+      DB_PASSWORD: ${DB_PASSWORD:-faben123}
+      DB_DATABASE: ${DB_DATABASE:-nest_crud_demo}
+      # 账户服务先启动并建表；账务服务依赖其 healthy 后才启动
+      DB_SYNC: ${DB_SYNC:-true}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: ""
+      REDIS_DB: 0
+      JWT_SECRET: ${JWT_SECRET:-please-change-me-in-production}
+      CORS_ORIGINS: ${CORS_ORIGINS:-}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      SERVICE_NAME: account-service
+      APP_VERSION: 0.0.1
+    ports:
+      - "${ACCOUNT_PORT:-3001}:3001"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3001/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 40s
+
+  # ---------------- 账务服务（微服务拆分，APP_ROLE=ledger，调用账户服务） ----------------
+  ledger-service:
+    profiles: ["split"]
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ledger-ledger
+    restart: unless-stopped
+    depends_on:
+      account-service:
+        condition: service_healthy
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      APP_ROLE: ledger
+      PORT: 3002
+      # 服务间调用：账务服务通过 HTTP 调用账户服务做归属/冻结校验
+      ACCOUNT_SERVICE_URL: http://account-service:3001
+      DB_HOST: mysql
+      DB_PORT: 3306
+      DB_USERNAME: ${DB_USERNAME:-root}
+      DB_PASSWORD: ${DB_PASSWORD:-faben123}
+      DB_DATABASE: ${DB_DATABASE:-nest_crud_demo}
+      DB_SYNC: ${DB_SYNC:-true}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: ""
+      REDIS_DB: 0
+      JWT_SECRET: ${JWT_SECRET:-please-change-me-in-production}
+      CORS_ORIGINS: ${CORS_ORIGINS:-}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      SERVICE_NAME: ledger-service
+      APP_VERSION: 0.0.1
+    ports:
+      - "${LEDGER_PORT:-3002}:3002"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3002/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 40s
+
 volumes:
   mysql-data:
   redis-data:

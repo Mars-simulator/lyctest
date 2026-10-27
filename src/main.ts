@@ -4,6 +4,8 @@ import { NestFactory } from '@nestjs/core';
 import { Logger as PinoNestLogger } from 'nestjs-pino';
 import { readFileSync } from 'node:fs';
 import { AppModule } from './app.module.js';
+import { AccountAppModule } from './apps/account-app.module.js';
+import { LedgerAppModule } from './apps/ledger-app.module.js';
 import { securityHeaders } from './common/security/security-headers.js';
 
 /** 配置了证书路径则启用 HTTPS；生产环境更推荐由 Nginx 等反向代理终止 TLS */
@@ -26,8 +28,13 @@ function resolveCorsOrigin(): string[] | boolean {
 
 async function bootstrap() {
   const httpsOptions = loadHttpsOptions();
+  // 按 APP_ROLE 决定启动哪个服务：account / ledger，默认单体
+  const role = process.env.APP_ROLE ?? 'monolith';
+  const rootModule =
+    role === 'account' ? AccountAppModule : role === 'ledger' ? LedgerAppModule : AppModule;
+
   // bufferLogs：启动早期日志先缓存，容器就绪后统一交给 pino 输出，避免丢失或格式分裂
-  const app = await NestFactory.create(AppModule, { httpsOptions, bufferLogs: true });
+  const app = await NestFactory.create(rootModule, { httpsOptions, bufferLogs: true });
 
   // 接管 Nest 框架自身日志（InstanceLoader / RouterExplorer / 未捕获异常等），
   // 使框架日志与业务日志共用同一个 pino 出口

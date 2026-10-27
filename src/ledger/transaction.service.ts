@@ -10,13 +10,12 @@ import { randomUUID } from 'node:crypto';
 import { DataSource, EntityManager, In, Repository } from 'typeorm';
 import type { AuthUser } from '../auth/interfaces/jwt-payload.interface.js';
 import { Role } from '../common/enums/role.enum.js';
-import { AccountService } from './account.service.js';
+import { AccountPort } from './account-port.js';
 import { MoneyOperationDto } from './dto/money-operation.dto.js';
 import { QueryTransactionDto } from './dto/query-transaction.dto.js';
 import { TransferDto } from './dto/transfer.dto.js';
 import { Account } from './entities/account.entity.js';
 import { Transaction } from './entities/transaction.entity.js';
-import { AccountStatus } from './enums/account-type.enum.js';
 import { TransactionStatus, TransactionType } from './enums/transaction-type.enum.js';
 import { centsToYuan } from './utils/money.util.js';
 
@@ -49,12 +48,12 @@ export class TransactionService {
   constructor(
     @InjectRepository(Transaction)
     private readonly txnRepo: Repository<Transaction>,
-    private readonly accountService: AccountService,
+    private readonly accountPort: AccountPort,
     private readonly dataSource: DataSource,
   ) {}
 
   /** 存入：资金由外部流入账户 */
-  async deposit(dto: MoneyOperationDto, operator: AuthUser) {
+  async deposit(dto: MoneyOperationDto, operator: AuthUser, authHeader?: string) {
     const txnNo = dto.txnNo ?? this.generateTxnNo('DP');
 
     return this.runIdempotent(txnNo, async (manager) => {
@@ -62,8 +61,10 @@ export class TransactionService {
       const existed = await manager.findOneBy(Transaction, { txnNo });
       if (existed) return existed;
 
+      // 通过账户网关校验（本地或 HTTP）：存在 + 归属（入金不校验冻结）
+      await this.accountPort.validateAccount(dto.accountId, 'deposit', operator, authHeader);
+
       const account = await this.lockAccount(manager, dto.accountId);
-      this.accountService.assertAccess(account, operator);
 
       account.balance += dto.amount;
       await manager.save(account);
@@ -86,7 +87,7 @@ export class TransactionService {
   }
 
   /** 取出：资金由账户流向外部 */
-  async withdraw(dto: MoneyOperationDto, operator: AuthUser) {
+  async withdraw(dto: MoneyOperationDto, operator: AuthUser, authHeader?: string) {
     const txnNo = dto.txnNo ?? this.generateTxnNo('WD');
 
     return this.runIdempotent(txnNo, async (manager) => {
@@ -94,9 +95,10 @@ export class TransactionService {
       const existed = await manager.findOneBy(Transaction, { txnNo });
       if (existed) return existed;
 
+      // 通过账户网关校验（本地或 HTTP）：存在 + 归属 + 未冻结
+      await this.accountPort.validateAccount(dto.accountId, 'withdraw', operator, authHeader);
+
       const account = await this.lockAccount(manager, dto.accountId);
-      this.accountService.assertAccess(account, operator);
-      this.assertNotFrozen(account);
       this.assertSufficient(account, dto.amount);
 
       account.balance -= dto.amount;
@@ -120,7 +122,7 @@ export class TransactionService {
   }
 
   /** 转账：账户之间划转 */
-  async transfer(dto: TransferDto, operator: AuthUser) {
+  async transfer(dto: TransferDto, operator: AuthUser, authHeader?: string) {
     if (dto.fromAccountId === dto.toAccountId) {
       throw new BadRequestException('转出账户与转入账户不能相同');
     }
@@ -130,6 +132,10 @@ export class TransactionService {
       // 幂等前置检查
       const existed = await manager.findOneBy(Transaction, { txnNo });
       if (existed) return existed;
+
+      // 通过账户网关校验（本地或 HTTP）：转出方需归属 + 未冻结，收款方仅需未冻结
+      await this.accountPort.validateAccount(dto.fromAccountId, 'withdraw', operator, authHeader);
+      await this.accountPort.validateAccount(dto.toAccountId, 'receive', operator, authHeader);
 
       // 按 id 升序加锁：保证 A→B 与 B→A 并发时加锁顺序一致，避免死锁
       const ids = [dto.fromAccountId, dto.toAccountId].sort((a, b) => a - b);
@@ -144,10 +150,7 @@ export class TransactionService {
       const from = locked.find((item) => item.id === dto.fromAccountId) as Account;
       const to = locked.find((item) => item.id === dto.toAccountId) as Account;
 
-      // 资金安全：出金方必须是操作者本人（或管理员）
-      this.accountService.assertAccess(from, operator);
-      this.assertNotFrozen(from);
-      this.assertNotFrozen(to);
+      // 余额与币种一致性在本地锁内校验（归属/冻结已由账户网关完成）
       this.assertSufficient(from, dto.amount);
       if (from.currency !== to.currency) {
         throw new BadRequestException(
@@ -177,7 +180,7 @@ export class TransactionService {
   }
 
   /** 流水分页查询，普通用户仅能查看自己名下账户的流水 */
-  async findPage(query: QueryTransactionDto, operator: AuthUser) {
+  async findPage(query: QueryTransactionDto, operator: AuthUser, authHeader?: string) {
     const page = Number.isFinite(query.page) && query.page > 0 ? Math.floor(query.page) : 1;
     const pageSize =
       Number.isFinite(query.pageSize) && query.pageSize > 0
@@ -188,7 +191,7 @@ export class TransactionService {
     const isAdmin = operator.roles.includes(Role.Admin);
 
     if (!isAdmin) {
-      const ownedIds = await this.accountService.findIdsByOwner(operator.userId);
+      const ownedIds = await this.accountPort.findIdsByOwner(operator.userId, authHeader);
       if (query.accountId !== undefined) {
         if (!ownedIds.includes(query.accountId)) {
           throw new ForbiddenException('无权查看该账户的流水');
@@ -235,14 +238,14 @@ export class TransactionService {
   }
 
   /** 按业务流水号查询 */
-  async findByTxnNo(txnNo: string, operator: AuthUser) {
+  async findByTxnNo(txnNo: string, operator: AuthUser, authHeader?: string) {
     const txn = await this.txnRepo.findOneBy({ txnNo });
     if (!txn) {
       throw new NotFoundException(`流水 ${txnNo} 不存在`);
     }
 
     if (!operator.roles.includes(Role.Admin)) {
-      const ownedIds = await this.accountService.findIdsByOwner(operator.userId);
+      const ownedIds = await this.accountPort.findIdsByOwner(operator.userId, authHeader);
       const related = [txn.fromAccountId, txn.toAccountId].filter(
         (id): id is number => id !== null,
       );
@@ -287,12 +290,6 @@ export class TransactionService {
       throw new NotFoundException(`账户 ${id} 不存在`);
     }
     return account;
-  }
-
-  private assertNotFrozen(account: Account): void {
-    if (account.status !== AccountStatus.Normal) {
-      throw new BadRequestException(`账户 ${account.accountNo} 已冻结，无法出金`);
-    }
   }
 
   private assertSufficient(account: Account, amount: number): void {

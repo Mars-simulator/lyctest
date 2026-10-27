@@ -1,8 +1,14 @@
-import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import type { AuthUser } from '../auth/interfaces/jwt-payload.interface.js';
 import { Role } from '../common/enums/role.enum.js';
+import type { AccountAction } from './account-port.js';
 import { CreateAccountDto } from './dto/create-account.dto.js';
 import { QueryAccountDto } from './dto/query-account.dto.js';
 import { UpdateAccountDto } from './dto/update-account.dto.js';
@@ -108,6 +114,29 @@ export class AccountService {
     if (account.ownerId !== operator.userId) {
       throw new ForbiddenException('无权操作该账户');
     }
+  }
+
+  /**
+   * 校验账户可用于资金操作（供资金操作服务通过本地/HTTP 调用）。
+   * - deposit：存在 + 归属（入金不校验冻结）
+   * - withdraw：存在 + 归属 + 未冻结
+   * - receive：存在 + 未冻结（收款方不校验归属）
+   */
+  async validateForOperation(
+    id: number,
+    operator: AuthUser,
+    action: AccountAction,
+  ): Promise<Account> {
+    const account = await this.findOne(id);
+
+    if (action !== 'receive') {
+      this.assertAccess(account, operator);
+    }
+    if (action !== 'deposit' && account.status !== AccountStatus.Normal) {
+      throw new BadRequestException(`账户 ${account.accountNo} 已冻结，无法出金`);
+    }
+
+    return account;
   }
 
   toView(account: Account) {

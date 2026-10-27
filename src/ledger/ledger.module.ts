@@ -1,17 +1,10 @@
 import { Module } from '@nestjs/common';
-import { TypeOrmModule } from '@nestjs/typeorm';
-import { AccountController } from './account.controller.js';
-import { AccountService } from './account.service.js';
-import { Account } from './entities/account.entity.js';
-import { Transaction } from './entities/transaction.entity.js';
-import { TransactionController } from './transaction.controller.js';
-import { TransactionService } from './transaction.service.js';
+import { AccountModule } from './account.module.js';
+import { TransactionModule } from './transaction.module.js';
 
-/** 账务管理模块：账户 + 资金流水 */
+/** 账务聚合模块：单体模式下同时暴露账户 + 交易接口（向后兼容 AppModule） */
 @Module({
-  imports: [TypeOrmModule.forFeature([Account, Transaction])],
-  controllers: [AccountController, TransactionController],
-  providers: [AccountService, TransactionService],
-  exports: [AccountService, TransactionService],
+  imports: [AccountModule, TransactionModule],
+  exports: [AccountModule, TransactionModule],
 })
 export class LedgerModule {}

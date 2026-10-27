@@ -10,10 +10,12 @@ import { getRepositoryToken } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import type { AuthUser } from '../auth/interfaces/jwt-payload.interface.js';
 import { Role } from '../common/enums/role.enum.js';
+import { AccountPort } from './account-port.js';
 import { AccountService } from './account.service.js';
 import { Account } from './entities/account.entity.js';
 import { Transaction } from './entities/transaction.entity.js';
 import { AccountStatus } from './enums/account-type.enum.js';
+import { LocalAccountPort } from './local-account-port.js';
 import { TransactionService } from './transaction.service.js';
 
 const accountRepoMock = {
@@ -80,6 +82,8 @@ describe('TransactionService', () => {
       Array.isArray(input) ? input : { id: 1, ...(input as object) },
     );
     managerMock.findOneBy.mockResolvedValue(null);
+    // 账户网关（本地实现）经 AccountService.findOne 读取账户，默认不存在
+    accountRepoMock.findOneBy.mockResolvedValue(null);
     dataSourceMock.transaction.mockImplementation((work: (m: unknown) => unknown) =>
       work(managerMock),
     );
@@ -90,8 +94,13 @@ describe('TransactionService', () => {
     const moduleRef = await Test.createTestingModule({
       providers: [
         TransactionService,
-        // 使用真实的 AccountService，以便覆盖真实的归属校验逻辑
+        // 使用真实的 AccountService + 本地 AccountPort，覆盖真实的归属/冻结校验逻辑
         AccountService,
+        {
+          provide: AccountPort,
+          inject: [AccountService],
+          useFactory: (accountService: AccountService) => new LocalAccountPort(accountService),
+        },
         { provide: getRepositoryToken(Transaction), useValue: txnRepoMock },
         { provide: getRepositoryToken(Account), useValue: accountRepoMock },
         { provide: DataSource, useValue: dataSourceMock },
@@ -104,6 +113,7 @@ describe('TransactionService', () => {
   describe('deposit（存入）', () => {
     it('余额增加，并记录变动后余额快照', async () => {
       const acc = account({ balance: 1000 });
+      accountRepoMock.findOneBy.mockResolvedValue(acc);
       managerMock.findOne.mockResolvedValue(acc);
 
       const result = await service.deposit({ accountId: 1, amount: 500 }, owner);
@@ -147,7 +157,7 @@ describe('TransactionService', () => {
     });
 
     it('操作他人账户抛 ForbiddenException（防越权）', async () => {
-      managerMock.findOne.mockResolvedValue(account({ ownerId: 999 }));
+      accountRepoMock.findOneBy.mockResolvedValue(account({ ownerId: 999 }));
 
       await expect(service.deposit({ accountId: 1, amount: 100 }, owner)).rejects.toBeInstanceOf(
         ForbiddenException,
@@ -156,7 +166,7 @@ describe('TransactionService', () => {
     });
 
     it('账户不存在抛 NotFoundException', async () => {
-      managerMock.findOne.mockResolvedValue(null);
+      accountRepoMock.findOneBy.mockResolvedValue(null);
 
       await expect(service.deposit({ accountId: 1, amount: 100 }, owner)).rejects.toBeInstanceOf(
         NotFoundException,
@@ -167,6 +177,7 @@ describe('TransactionService', () => {
   describe('withdraw（取出）', () => {
     it('余额减少', async () => {
       const acc = account({ balance: 1000 });
+      accountRepoMock.findOneBy.mockResolvedValue(acc);
       managerMock.findOne.mockResolvedValue(acc);
 
       await service.withdraw({ accountId: 1, amount: 300 }, owner);
@@ -182,6 +193,7 @@ describe('TransactionService', () => {
     });
 
     it('余额不足时拒绝，且不写库', async () => {
+      accountRepoMock.findOneBy.mockResolvedValue(account({ ownerId: 7 }));
       managerMock.findOne.mockResolvedValue(account({ balance: 100 }));
 
       await expect(
@@ -191,8 +203,8 @@ describe('TransactionService', () => {
     });
 
     it('冻结账户禁止出金', async () => {
-      managerMock.findOne.mockResolvedValue(
-        account({ balance: 1000, status: AccountStatus.Frozen }),
+      accountRepoMock.findOneBy.mockResolvedValue(
+        account({ ownerId: 7, status: AccountStatus.Frozen }),
       );
 
       await expect(
@@ -204,6 +216,9 @@ describe('TransactionService', () => {
 
   describe('transfer（转账）', () => {
     it('双方余额同时变更，快照分别记录', async () => {
+      accountRepoMock.findOneBy
+        .mockResolvedValueOnce(account({ id: 1, ownerId: 7 }))
+        .mockResolvedValueOnce(account({ id: 2, ownerId: 999 }));
       const from = account({ id: 1, balance: 1000 });
       const to = account({ id: 2, accountNo: 'AC002', ownerId: 999, balance: 200 });
       managerMock.find.mockResolvedValue([from, to]);
@@ -224,6 +239,9 @@ describe('TransactionService', () => {
     });
 
     it('使用悲观写锁按 id 集合加锁，避免并发死锁', async () => {
+      accountRepoMock.findOneBy
+        .mockResolvedValueOnce(account({ id: 2, ownerId: 7 }))
+        .mockResolvedValueOnce(account({ id: 1, ownerId: 999 }));
       managerMock.find.mockResolvedValue([account({ id: 1 }), account({ id: 2 })]);
 
       await service.transfer({ fromAccountId: 2, toAccountId: 1, amount: 100 }, owner);
@@ -242,6 +260,9 @@ describe('TransactionService', () => {
     });
 
     it('余额不足时拒绝', async () => {
+      accountRepoMock.findOneBy
+        .mockResolvedValueOnce(account({ id: 1, ownerId: 7 }))
+        .mockResolvedValueOnce(account({ id: 2, ownerId: 999 }));
       managerMock.find.mockResolvedValue([
         account({ id: 1, balance: 100 }),
         account({ id: 2, ownerId: 999 }),
@@ -253,6 +274,9 @@ describe('TransactionService', () => {
     });
 
     it('币种不一致时拒绝', async () => {
+      accountRepoMock.findOneBy
+        .mockResolvedValueOnce(account({ id: 1, ownerId: 7 }))
+        .mockResolvedValueOnce(account({ id: 2, ownerId: 999 }));
       managerMock.find.mockResolvedValue([
         account({ id: 1, currency: 'CNY' }),
         account({ id: 2, ownerId: 999, currency: 'USD' }),
@@ -264,6 +288,9 @@ describe('TransactionService', () => {
     });
 
     it('账户缺失时抛 NotFoundException', async () => {
+      accountRepoMock.findOneBy
+        .mockResolvedValueOnce(account({ id: 1, ownerId: 7 }))
+        .mockResolvedValueOnce(account({ id: 2, ownerId: 999 }));
       managerMock.find.mockResolvedValue([account({ id: 1 })]);
 
       await expect(
@@ -272,10 +299,7 @@ describe('TransactionService', () => {
     });
 
     it('非本人账户不可作为转出方', async () => {
-      managerMock.find.mockResolvedValue([
-        account({ id: 1, ownerId: 999 }),
-        account({ id: 2, ownerId: 999 }),
-      ]);
+      accountRepoMock.findOneBy.mockResolvedValueOnce(account({ id: 1, ownerId: 999 }));
 
       await expect(
         service.transfer({ fromAccountId: 1, toAccountId: 2, amount: 100 }, owner),

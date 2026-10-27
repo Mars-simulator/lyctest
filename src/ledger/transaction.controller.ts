@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common';
+import { Body, Controller, Get, Headers, Param, Post, Query } from '@nestjs/common';
 import type { AuthUser } from '../auth/interfaces/jwt-payload.interface.js';
 import { CurrentUser } from '../common/decorators/current-user.decorator.js';
 import { RateLimit } from '../common/security/rate-limit.decorator.js';
@@ -14,33 +14,53 @@ export class TransactionController {
   /** 存入（入金） */
   @RateLimit({ limit: 30, windowMs: 60_000 })
   @Post('deposit')
-  deposit(@Body() dto: MoneyOperationDto, @CurrentUser() operator: AuthUser) {
-    return this.transactionService.deposit(dto, operator);
+  deposit(
+    @Body() dto: MoneyOperationDto,
+    @CurrentUser() operator: AuthUser,
+    @Headers('authorization') authHeader?: string,
+  ) {
+    return this.transactionService.deposit(dto, operator, authHeader);
   }
 
   /** 取出（出金） */
   @RateLimit({ limit: 30, windowMs: 60_000 })
   @Post('withdraw')
-  withdraw(@Body() dto: MoneyOperationDto, @CurrentUser() operator: AuthUser) {
-    return this.transactionService.withdraw(dto, operator);
+  withdraw(
+    @Body() dto: MoneyOperationDto,
+    @CurrentUser() operator: AuthUser,
+    @Headers('authorization') authHeader?: string,
+  ) {
+    return this.transactionService.withdraw(dto, operator, authHeader);
   }
 
   /** 转账 */
   @RateLimit({ limit: 30, windowMs: 60_000 })
   @Post('transfer')
-  transfer(@Body() dto: TransferDto, @CurrentUser() operator: AuthUser) {
-    return this.transactionService.transfer(dto, operator);
+  transfer(
+    @Body() dto: TransferDto,
+    @CurrentUser() operator: AuthUser,
+    @Headers('authorization') authHeader?: string,
+  ) {
+    return this.transactionService.transfer(dto, operator, authHeader);
   }
 
   /** 流水分页查询 */
   @Get()
-  findPage(@Query() query: QueryTransactionDto, @CurrentUser() operator: AuthUser) {
-    return this.transactionService.findPage(query, operator);
+  findPage(
+    @Query() query: QueryTransactionDto,
+    @CurrentUser() operator: AuthUser,
+    @Headers('authorization') authHeader?: string,
+  ) {
+    return this.transactionService.findPage(query, operator, authHeader);
   }
 
   /** 按业务流水号查询单笔流水 */
   @Get(':txnNo')
-  findOne(@Param('txnNo') txnNo: string, @CurrentUser() operator: AuthUser) {
-    return this.transactionService.findByTxnNo(txnNo, operator);
+  findOne(
+    @Param('txnNo') txnNo: string,
+    @CurrentUser() operator: AuthUser,
+    @Headers('authorization') authHeader?: string,
+  ) {
+    return this.transactionService.findByTxnNo(txnNo, operator, authHeader);
   }
 }
