@@ -16,7 +16,7 @@ spec:
     spec:
       containers:
         - name: consumer
-          image: rabbitmq-demo-consumer:v2
+          image: rabbitmq-demo-consumer:v3
           imagePullPolicy: IfNotPresent
           env:
             - name: RABBITMQ_URL

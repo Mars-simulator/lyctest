@@ -16,7 +16,7 @@ spec:
     spec:
       containers:
         - name: producer
-          image: rabbitmq-demo-producer:v2
+          image: rabbitmq-demo-producer:v4
           imagePullPolicy: IfNotPresent
           env:
             # RabbitMQ 用 Docker 起在宿主机，Docker Desktop 的 K8s Pod 通过该域名访问宿主机
