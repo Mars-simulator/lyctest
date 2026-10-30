@@ -1,0 +1,41 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kafka-producer
+  labels:
+    app: kafka-producer
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: kafka-producer
+  template:
+    metadata:
+      labels:
+        app: kafka-producer
+    spec:
+      containers:
+        - name: kafka-producer
+          image: kafka-demo-producer:latest
+          imagePullPolicy: IfNotPresent
+          env:
+            # Kafka 用 Docker 起在宿主机，Docker Desktop 的 K8s Pod 通过该域名访问
+            - name: KAFKA_BROKERS
+              value: "host.docker.internal:9092"
+          ports:
+            - containerPort: 3000
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kafka-producer
+  labels:
+    app: kafka-producer
+spec:
+  type: NodePort
+  selector:
+    app: kafka-producer
+  ports:
+    - port: 3000
+      targetPort: 3000
+      nodePort: 30090
