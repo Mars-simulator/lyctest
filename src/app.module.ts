@@ -19,6 +19,7 @@ import { AppLoggerModule } from './common/logger/logger.module.js';
 import { HealthController } from './health/health.controller.js';
 import { OrdersController } from './orders/orders.controller.js';
 import { OrdersService } from './orders/orders.service.js';
+import { LockDemoModule } from './lock-demo/lock-demo.module.js';
 
 // ESM 下获取 __dirname
 const __filename = fileURLToPath(import.meta.url);
@@ -53,6 +54,8 @@ const isProduction = process.env.NODE_ENV === 'production';
     AppLoggerModule,
     // 健康检查
     TerminusModule,
+    // 分布式锁 + 令牌桶限流练习
+    LockDemoModule,
   ],
   controllers: [AppController,HealthController, OrdersController],
   providers: [
