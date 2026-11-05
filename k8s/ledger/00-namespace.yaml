@@ -1,0 +1,7 @@
+# 账务服务独立命名空间，与 kube-system / default 隔离
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ledger
+  labels:
+    app.kubernetes.io/part-of: ledger-stack

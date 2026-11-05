@@ -1,0 +1,139 @@
+# 账务服务（APP_ROLE=ledger）—— 本次部署的主角
+# 通过 Service 暴露，NodePort 30082 供集群外访问
+#
+# 副本数说明：首次启动需要由本服务创建 ledger_transaction 表（DB_SYNC=true），
+# 多副本并发 synchronize 可能触发 DDL 冲突，故先以 1 副本启动完成建表；
+# 表建好之后再扩容是安全的（schema 无差异时 TypeORM 不会执行 DDL）。
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ledger-service
+  namespace: ledger
+  labels:
+    app: ledger-service
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ledger-service
+  template:
+    metadata:
+      labels:
+        app: ledger-service
+    spec:
+      # 依赖未就绪时先等待，避免进程反复 CrashLoopBackOff
+      initContainers:
+        - name: wait-for-deps
+          image: nest-typeorm-crud-ledger-service:latest
+          imagePullPolicy: IfNotPresent
+          command:
+            - sh
+            - -c
+            - |
+              wait_tcp() {
+                host="$1"; port="$2"; label="$3"; i=0
+                until node -e "const s=require('net').connect($port,'$host');s.on('connect',()=>{s.destroy();process.exit(0)});s.on('error',()=>process.exit(1))" 2>/dev/null; do
+                  i=$((i+1))
+                  if [ "$i" -ge 90 ]; then echo "$label 未就绪，退出"; exit 1; fi
+                  echo "等待 $label ($host:$port) ..."
+                  sleep 2
+                done
+                echo "$label 已就绪"
+              }
+              wait_tcp mysql 3306 mysql
+              wait_tcp redis 6379 redis
+              wait_tcp account-service 3001 account-service
+      containers:
+        - name: ledger-service
+          image: nest-typeorm-crud-ledger-service:latest
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: NODE_ENV
+              value: production
+            - name: APP_ROLE
+              value: ledger
+            - name: PORT
+              value: "3002"
+            - name: SERVICE_NAME
+              value: ledger-service
+            - name: APP_VERSION
+              value: 0.0.1
+            - name: LOG_LEVEL
+              value: info
+            # 服务间调用：集群内 DNS 直接解析 account-service
+            - name: ACCOUNT_SERVICE_URL
+              value: http://account-service:3001
+            - name: DB_HOST
+              value: mysql
+            - name: DB_PORT
+              value: "3306"
+            - name: DB_USERNAME
+              value: root
+            - name: DB_DATABASE
+              value: nest_crud_demo
+            # 账务服务持有 ledger_transaction 表，需由本服务创建
+            # （account-service 只建 account / user 表）
+            - name: DB_SYNC
+              value: "true"
+            - name: REDIS_HOST
+              value: redis
+            - name: REDIS_PORT
+              value: "6379"
+            - name: REDIS_DB
+              value: "0"
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: ledger-secret
+                  key: DB_PASSWORD
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: ledger-secret
+                  key: JWT_SECRET
+          ports:
+            - name: http
+              containerPort: 3002
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 6
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: "1"
+              memory: 512Mi
+---
+# 暴露方式：NodePort（固定 30082）
+# 访问路径：
+#   1) 集群内：http://ledger-service.ledger.svc.cluster.local:3002
+#   2) 宿主机：kubectl port-forward 后 http://localhost:8082
+#   3) 节点：minikube ip 取节点 IP 后 http://<nodeIP>:30082（Windows + Docker driver 建议用前两种）
+apiVersion: v1
+kind: Service
+metadata:
+  name: ledger-service
+  namespace: ledger
+spec:
+  type: NodePort
+  selector:
+    app: ledger-service
+  ports:
+    - name: http
+      port: 3002
+      targetPort: http
+      nodePort: 30082
