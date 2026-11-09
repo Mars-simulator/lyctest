@@ -13,6 +13,10 @@ import { bigintTransformer } from '../utils/money.util.js';
  * 每笔流水都记录变动后的余额快照，便于对账与排查。
  */
 @Entity('ledger_transaction')
+// 流水查询固定按「账户 + 时间倒序」过滤，复合索引可同时覆盖
+// WHERE 与 ORDER BY，避免 fromAccountId/toAccountId 无索引导致的全表扫描
+@Index('idx_from_time', ['fromAccountId', 'createTime'])
+@Index('idx_to_time', ['toAccountId', 'createTime'])
 export class Transaction {
   @PrimaryGeneratedColumn()
   id: number;

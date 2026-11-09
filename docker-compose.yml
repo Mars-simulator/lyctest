@@ -115,6 +115,8 @@ services:
       JWT_SECRET: ${JWT_SECRET:-please-change-me-in-production}
       CORS_ORIGINS: ${CORS_ORIGINS:-}
       LOG_LEVEL: ${LOG_LEVEL:-info}
+      # 压测时置 true 以排除限流干扰（默认关闭，生产必须保持 false）
+      RATE_LIMIT_DISABLED: ${RATE_LIMIT_DISABLED:-false}
       SERVICE_NAME: account-service
       APP_VERSION: 0.0.1
     ports:
@@ -160,6 +162,10 @@ services:
       JWT_SECRET: ${JWT_SECRET:-please-change-me-in-production}
       CORS_ORIGINS: ${CORS_ORIGINS:-}
       LOG_LEVEL: ${LOG_LEVEL:-info}
+      # 压测时置 true 以排除限流干扰（默认关闭，生产必须保持 false）
+      RATE_LIMIT_DISABLED: ${RATE_LIMIT_DISABLED:-false}
+      # 数据库连接池大小（默认 10），压测时可调大
+      DB_POOL_SIZE: ${DB_POOL_SIZE:-10}
       SERVICE_NAME: ledger-service
       APP_VERSION: 0.0.1
     ports:

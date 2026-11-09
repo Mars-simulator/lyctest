@@ -17,5 +17,10 @@ export function createTypeOrmOptions(entities: (string | Function)[]) {
     synchronize:
       process.env.DB_SYNC === 'true' || (!isProduction && process.env.DB_SYNC !== 'false'),
     logging: false,
+    // mysql2 连接池上限（默认 10）。压测显示高并发下请求会排队等连接，
+    // 可通过 DB_POOL_SIZE 调整；注意不要超过 MySQL 的 max_connections。
+    extra: {
+      connectionLimit: Number(process.env.DB_POOL_SIZE ?? 10),
+    },
   };
 }

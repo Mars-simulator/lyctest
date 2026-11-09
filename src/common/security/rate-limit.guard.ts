@@ -34,6 +34,9 @@ export class RateLimitGuard implements CanActivate {
   constructor(private readonly reflector: Reflector) {}
 
   canActivate(context: ExecutionContext): boolean {
+    // 压测 / 内网联调可临时关闭；生产环境必须保持开启
+    if (process.env.RATE_LIMIT_DISABLED === 'true') return true;
+
     const options =
       this.reflector.getAllAndOverride<RateLimitOptions>(RATE_LIMIT_KEY, [
         context.getHandler(),
