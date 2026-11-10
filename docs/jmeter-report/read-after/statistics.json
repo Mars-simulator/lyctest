@@ -1,0 +1,34 @@
+{
+  "Total" : {
+    "transaction" : "Total",
+    "sampleCount" : 1887,
+    "errorCount" : 0,
+    "errorPct" : 0.0,
+    "meanResTime" : 154.43508214096443,
+    "medianResTime" : 145.0,
+    "minResTime" : 39.0,
+    "maxResTime" : 420.0,
+    "pct1ResTime" : 217.0,
+    "pct2ResTime" : 240.0,
+    "pct3ResTime" : 321.2399999999998,
+    "throughput" : 124.85113140134973,
+    "receivedKBytesPerSec" : 746.5544414532883,
+    "sentKBytesPerSec" : 57.949815775109165
+  },
+  "GET /ledger/transactions" : {
+    "transaction" : "GET /ledger/transactions",
+    "sampleCount" : 1887,
+    "errorCount" : 0,
+    "errorPct" : 0.0,
+    "meanResTime" : 154.43508214096443,
+    "medianResTime" : 145.0,
+    "minResTime" : 39.0,
+    "maxResTime" : 420.0,
+    "pct1ResTime" : 217.0,
+    "pct2ResTime" : 240.0,
+    "pct3ResTime" : 321.2399999999998,
+    "throughput" : 124.85113140134973,
+    "receivedKBytesPerSec" : 746.5544414532883,
+    "sentKBytesPerSec" : 57.949815775109165
+  }
+}
