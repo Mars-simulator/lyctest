@@ -3,7 +3,10 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>qiankun 子应用</title>
+    <title>账户中心</title>
+    <!-- 首屏要打两个后端接口，提前建连省掉 TLS/TCP 握手的往返 -->
+    <link rel="preconnect" href="http://localhost:3001" />
+    <link rel="preconnect" href="http://localhost:3002" />
   </head>
   <body>
     <div id="app"></div>

@@ -1,8 +1,11 @@
 <!DOCTYPE html><html lang="zh-CN"><head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>qiankun 子应用</title>
-    <script crossorigin="">import('/sub-app/assets/index-_vlKz0Qs.js').finally(() => {
+    <title>账户中心</title>
+    <!-- 首屏要打两个后端接口，提前建连省掉 TLS/TCP 握手的往返 -->
+    <link rel="preconnect" href="http://localhost:3001">
+    <link rel="preconnect" href="http://localhost:3002">
+    <script crossorigin="">import('/sub-app/assets/index-9fkXZdJD.js').finally(() => {
             
     const qiankunLifeCycle = window.moudleQiankunAppLifeCycles && window.moudleQiankunAppLifeCycles['sub-app'];
     if (qiankunLifeCycle) {
@@ -13,7 +16,7 @@
     }
   
           })</script>
-    <link rel="stylesheet" crossorigin="" href="/sub-app/assets/index-wvswy96Q.css">
+    <link rel="stylesheet" crossorigin="" href="/sub-app/assets/index-O-W47XUl.css">
   </head>
   <body>
     <div id="app"></div>

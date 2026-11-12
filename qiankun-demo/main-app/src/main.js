@@ -66,8 +66,8 @@ router.isReady().then(() => {
     [
       {
         name: 'sub-app',
-        // 子应用入口：dev 环境指向 vite dev server
-        entry: '//localhost:5174',
+        // 子应用入口：dev 指向 dev server，构建时可用 VITE_SUB_APP_ENTRY 覆盖
+        entry: import.meta.env.VITE_SUB_APP_ENTRY || '//localhost:5174',
         container: '#sub-container',
         activeRule: '/sub-app',
         // 通过 props 把主应用能力注入子应用（状态、路由、标识）
